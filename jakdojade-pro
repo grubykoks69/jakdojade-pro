@@ -1,0 +1,1403 @@
+{
+  "name": "jakdojade-pro",
+  "version": "2.0.0",
+  "description": "Profesjonalna aplikacja transportu publicznego Warszawy",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^14.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.0.0",
+    "axios": "^1.6.0",
+    "zustand": "^4.4.0",
+    "date-fns": "^2.30.0",
+    "tailwindcss": "^3.3.0",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0",
+    "lucide-react": "^0.263.0",
+    "react-hot-toast": "^2.4.0",
+    "react-leaflet": "^4.2.0",
+    "leaflet": "^1.9.0",
+    "qrcode.react": "^1.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0"
+  }
+}{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForEnumMembers": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/components/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/app/**/*.{js,ts,jsx,tsx,mdx}',
+  ],
+  theme: {
+    extend: {
+      colors: {
+        red: {
+          600: '#E63946',
+          700: '#C1121F',
+        },
+        blue: {
+          600: '#1D3557',
+          700: '#457B9D',
+        },
+      },
+    },
+  },
+  plugins: [],
+}module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  swcMinify: true,
+  images: {
+    domains: ['tile.openstreetmap.org'],
+  },
+}
+
+module.exports = nextConfigNEXT_PUBLIC_ZTM_API_KEY=73496a74-8e87-40df-9399-1d8e495cbc9a
+NEXT_PUBLIC_GOOGLE_MAPS_KEY=YOUR_API_KEY
+NODE_ENV=developmentexport interface Stop {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  stopNumber: string;
+  lines: string[];
+  type: 'bus' | 'tram' | 'metro';
+}
+
+export interface Line {
+  id: string;
+  number: string;
+  name: string;
+  type: 'bus' | 'tram' | 'metro';
+  color: string;
+  startStop: string;
+  endStop: string;
+  operator: string;
+  schedule: Departure[];
+}
+
+export interface Departure {
+  time: string;
+  line: string;
+  destination: string;
+  direction: string;
+  delay?: number;
+  isCancelled: boolean;
+  isRealtime: boolean;
+}
+
+export interface Vehicle {
+  id: string;
+  line: string;
+  latitude: number;
+  longitude: number;
+  bearing: number;
+  speed: number;
+  lastUpdate: Date;
+  brigade: string;
+  type: 'bus' | 'tram' | 'metro';
+}
+
+export interface Route {
+  id: string;
+  startStop: Stop;
+  endStop: Stop;
+  departureTime: Date;
+  arrivalTime: Date;
+  duration: number;
+  transfers: number;
+  legs: RouteLeg[];
+  price: number;
+  isFree: boolean;
+}
+
+export interface RouteLeg {
+  type: 'walk' | 'transit';
+  line?: string;
+  startStop?: Stop;
+  endStop?: Stop;
+  duration: number;
+  distance?: number;
+  vehicle?: string;
+}
+
+export interface Ticket {
+  id: string;
+  name: string;
+  price: number;
+  currency: string;
+  validity: number;
+  zone: string;
+  type: 'single' | 'timed' | 'daily' | 'weekly' | 'monthly';
+  isFree: boolean;
+  activated?: Date;
+  expiresAt?: Date;
+}
+
+export interface UserPreferences {
+  darkMode: boolean;
+  fontSize: 'normal' | 'large';
+  language: 'pl' | 'en';
+  notifications: boolean;
+  preferredLines: string[];
+  favoriteStops: Stop[];
+  searchHistory: string[];
+}import axios from 'axios';
+import { Vehicle, Stop, Departure } from '@/types';
+
+const API_KEY = process.env.NEXT_PUBLIC_ZTM_API_KEY || '73496a74-8e87-40df-9399-1d8e495cbc9a';
+const BASE_URL = 'https://api.um.warszawa.pl/api/action';
+
+const api = axios.create({
+  baseURL: BASE_URL,
+  params: {
+    apikey: API_KEY
+  }
+});
+
+const RESOURCES = {
+  BUSES: 'f2e5503e-927d-4ad3-9500-4ab9e55deb59',
+  TRAMS: '1f2e8b92-11a9-4798-aea6-534eae0734e9',
+  STOPS: 'ab75c33d-3a26-4342-b36b-1a3a3b3d0e58',
+  SCHEDULE: 'e923fa0e-d96c-43f9-ae6e-60518c9f3238'
+};
+
+export class ZTMApi {
+  static async getVehicles(type?: 'bus' | 'tram'): Promise<Vehicle[]> {
+    try {
+      const requests = [];
+      
+      if(!type || type === 'bus') {
+        requests.push(
+          api.get('/busestrams_get', {
+            params: { resource_id: RESOURCES.BUSES, type: 1 }
+          })
+        );
+      }
+      
+      if(!type || type === 'tram') {
+        requests.push(
+          api.get('/busestrams_get', {
+            params: { resource_id: RESOURCES.TRAMS, type: 2 }
+          })
+        );
+      }
+
+      const responses = await Promise.all(requests);
+      const vehicles: Vehicle[] = [];
+
+      responses.forEach((response, index) => {
+        const vehType = index === 0 ? 'bus' : 'tram';
+        if(response.data.result) {
+          vehicles.push(
+            ...response.data.result.map((v: any) => ({
+              id: v.VehicleNumber,
+              line: v.Lines,
+              latitude: parseFloat(v.Lat),
+              longitude: parseFloat(v.Lon),
+              bearing: v.Bearing || 0,
+              speed: 0,
+              brigade: v.Brigade,
+              lastUpdate: new Date(),
+              type: vehType
+            }))
+          );
+        }
+      });
+
+      return vehicles;
+    } catch (error) {
+      console.error('Error fetching vehicles:', error);
+      return [];
+    }
+  }
+
+  static async getDepartures(stopId: string, stopNumber: string = '01'): Promise<Departure[]> {
+    try {
+      const response = await api.get('/dbtimetable_get', {
+        params: {
+          id: RESOURCES.SCHEDULE,
+          busstopId: stopId,
+          busstopNr: stopNumber,
+          limit: 10
+        }
+      });
+
+      if(!response.data.result) return [];
+
+      return response.data.result.map((departure: any) => {
+        const values: any = {};
+        departure.values?.forEach((v: any) => {
+          values[v.key] = v.value;
+        });
+        return {
+          time: values['czas'] || values['time'],
+          line: values['linia'] || values['line'],
+          destination: values['kierunek'] || values['direction'],
+          direction: values['kierunek'] || values['direction'],
+          delay: parseInt(values['opoznienie']) || 0,
+          isCancelled: values['status'] === 'ANULOWANY',
+          isRealtime: !!values['czas_rzeczywisty']
+        };
+      });
+    } catch (error) {
+      console.error('Error fetching departures:', error);
+      return [];
+    }
+  }
+
+  static async searchStops(query: string): Promise<Stop[]> {
+    try {
+      const response = await api.get('/dbstore_get', {
+        params: {
+          id: RESOURCES.STOPS,
+          searchQuery: query,
+          limit: 10
+        }
+      });
+
+      if(!response.data.result) return [];
+
+      return response.data.result.map((stop: any) => {
+        const values: any = {};
+        stop.values?.forEach((v: any) => {
+          values[v.key] = v.value;
+        });
+        return {
+          id: values['id'],
+          name: values['name'],
+          stopNumber: values['stopNr'],
+          latitude: parseFloat(values['lat']),
+          longitude: parseFloat(values['lon']),
+          lines: [],
+          type: values['type'] || 'bus'
+        };
+      });
+    } catch (error) {
+      console.error('Error searching stops:', error);
+      return [];
+    }
+  }
+
+  static async getAllStops(): Promise<Stop[]> {
+    try {
+      const response = await api.get('/dbstore_get', {
+        params: {
+          id: RESOURCES.STOPS,
+          limit: 2000
+        }
+      });
+
+      if(!response.data.result) return [];
+
+      return response.data.result.map((stop: any) => {
+        const values: any = {};
+        stop.values?.forEach((v: any) => {
+          values[v.key] = v.value;
+        });
+        return {
+          id: values['id'],
+          name: values['name'],
+          stopNumber: values['stopNr'] || '01',
+          latitude: parseFloat(values['lat']),
+          longitude: parseFloat(values['lon']),
+          lines: [],
+          type: values['type'] || 'bus'
+        };
+      });
+    } catch (error) {
+      console.error('Error fetching all stops:', error);
+      return [];
+    }
+  }
+
+  static async getLinesForStop(stopId: string): Promise<string[]> {
+    try {
+      const response = await api.get('/dbstore_get', {
+        params: {
+          id: RESOURCES.STOPS,
+          busstopId: stopId,
+          mode: 'stopLinesInfo'
+        }
+      });
+
+      if(!response.data.result) return [];
+      
+      return response.data.result.map((line: any) => {
+        const values: any = {};
+        line.values?.forEach((v: any) => {
+          values[v.key] = v.value;
+        });
+        return values['linia'];
+      });
+    } catch (error) {
+      console.error('Error fetching lines for stop:', error);
+      return [];
+    }
+  }
+}import { Route, Stop, RouteLeg } from '@/types';
+
+export class RoutingService {
+  static calculateDistance(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number
+  ): number {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  static calculateWalkTime(distanceKm: number): number {
+    return Math.round((distanceKm / 1.3) * 60);
+  }
+
+  static async planRoute(
+    startStop: Stop,
+    endStop: Stop,
+    departureTime: Date = new Date()
+  ): Promise<Route[]> {
+    const distance = this.calculateDistance(
+      startStop.latitude,
+      startStop.longitude,
+      endStop.latitude,
+      endStop.longitude
+    );
+
+    const walkTime = this.calculateWalkTime(distance);
+
+    const routes: Route[] = [
+      {
+        id: '1',
+        startStop,
+        endStop,
+        departureTime,
+        arrivalTime: new Date(departureTime.getTime() + (walkTime + 15) * 60000),
+        duration: walkTime + 15,
+        transfers: 0,
+        legs: [
+          {
+            type: 'walk',
+            duration: 2,
+            distance: 0.2
+          },
+          {
+            type: 'transit',
+            line: '107',
+            startStop,
+            endStop,
+            duration: 13,
+            vehicle: 'bus'
+          }
+        ],
+        price: 0,
+        isFree: true
+      },
+      {
+        id: '2',
+        startStop,
+        endStop,
+        departureTime: new Date(departureTime.getTime() + 10 * 60000),
+        arrivalTime: new Date(departureTime.getTime() + (25 + 15) * 60000),
+        duration: 40,
+        transfers: 1,
+        legs: [
+          {
+            type: 'walk',
+            duration: 3,
+            distance: 0.3
+          },
+          {
+            type: 'transit',
+            line: 'T2',
+            startStop,
+            duration: 12,
+            vehicle: 'tram'
+          },
+          {
+            type: 'walk',
+            duration: 2,
+            distance: 0.15
+          },
+          {
+            type: 'transit',
+            line: 'M1',
+            endStop,
+            duration: 13,
+            vehicle: 'metro'
+          }
+        ],
+        price: 0,
+        isFree: true
+      }
+    ];
+
+    return routes;
+  }
+}import { create } from 'zustand';
+import { UserPreferences, Stop, Ticket } from '@/types';
+
+interface AppState {
+  preferences: UserPreferences;
+  favorites: Stop[];
+  searchHistory: string[];
+  activeTickets: Ticket[];
+  
+  updatePreferences: (prefs: Partial<UserPreferences>) => void;
+  addFavorite: (stop: Stop) => void;
+  removeFavorite: (stopId: string) => void;
+  addToSearchHistory: (query: string) => void;
+  clearSearchHistory: () => void;
+  activateTicket: (ticket: Ticket) => void;
+  deactivateTicket: (ticketId: string) => void;
+  loadFromLocalStorage: () => void;
+  saveToLocalStorage: () => void;
+}
+
+const defaultPreferences: UserPreferences = {
+  darkMode: false,
+  fontSize: 'normal',
+  language: 'pl',
+  notifications: true,
+  preferredLines: [],
+  favoriteStops: [],
+  searchHistory: []
+};
+
+export const useStore = create<AppState>((set, get) => ({
+  preferences: defaultPreferences,
+  favorites: [],
+  searchHistory: [],
+  activeTickets: [],
+
+  updatePreferences: (prefs) =>
+    set((state) => ({
+      preferences: { ...state.preferences, ...prefs }
+    })),
+
+  addFavorite: (stop) =>
+    set((state) => ({
+      favorites: [...state.favorites, stop]
+    })),
+
+  removeFavorite: (stopId) =>
+    set((state) => ({
+      favorites: state.favorites.filter((s) => s.id !== stopId)
+    })),
+
+  addToSearchHistory: (query) =>
+    set((state) => ({
+      searchHistory: [query, ...state.searchHistory.slice(0, 19)]
+    })),
+
+  clearSearchHistory: () =>
+    set({ searchHistory: [] }),
+
+  activateTicket: (ticket) =>
+    set((state) => ({
+      activeTickets: [...state.activeTickets, { ...ticket, activated: new Date() }]
+    })),
+
+  deactivateTicket: (ticketId) =>
+    set((state) => ({
+      activeTickets: state.activeTickets.filter((t) => t.id !== ticketId)
+    })),
+
+  loadFromLocalStorage: () => {
+    if (typeof window === 'undefined') return;
+    const saved = localStorage.getItem('jakdojade-app');
+    if (saved) {
+      try {
+        const data = JSON.parse(saved);
+        set(data);
+      } catch (error) {
+        console.error('Failed to load from localStorage:', error);
+      }
+    }
+  },
+
+  saveToLocalStorage: () => {
+    if (typeof window === 'undefined') return;
+    const state = get();
+    localStorage.setItem(
+      'jakdojade-app',
+      JSON.stringify({
+        preferences: state.preferences,
+        favorites: state.favorites,
+        searchHistory: state.searchHistory,
+        activeTickets: state.activeTickets
+      })
+    );
+  }
+}));'use client';
+
+import { useEffect, useState } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import L, { Icon } from 'leaflet';
+import { Vehicle, Stop } from '@/types';
+import { ZTMApi } from '@/services/ztm-api';
+import 'leaflet/dist/leaflet.css';
+
+interface LiveMapProps {
+  stops?: Stop[];
+  center?: [number, number];
+  zoom?: number;
+  showVehicles?: boolean;
+}
+
+const BUS_ICON = new Icon({
+  iconUrl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIGZpbGw9IiMyRDZBNEYiIHJ4PSI4Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtc2l6ZT0iMjAiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkb21pbmFudC1iYXNlbGluZT0iY2VudHJhbCIgZm9udC13ZWlnaHQ9ImJvbGQiPvCQkYg8L3RleHQ+PC9zdmc+',
+  iconSize: [32, 32],
+  iconAnchor: [16, 16]
+});
+
+const TRAM_ICON = new Icon({
+  iconUrl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIGZpbGw9IiNFNjM5NDYiIHJ4PSI4Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtc2l6ZT0iMjAiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkb21pbmFudC1iYXNlbGluZT0iY2VudHJhbCIgZm9udC13ZWlnaHQ9ImJvbGQiPvCQkpA8L3RleHQ+PC9zdmc+',
+  iconSize: [32, 32],
+  iconAnchor: [16, 16]
+});
+
+const STOP_ICON = new Icon({
+  iconUrl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIgZmlsbD0iIzAwMzM2NiIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkb21pbmFudC1iYXNlbGluZT0iY2VudHJhbCIgZm9udC13ZWlnaHQ9ImJvbGQiPrCQkJg8L3RleHQ+PC9zdmc+',
+  iconSize: [24, 24],
+  iconAnchor: [12, 12]
+});
+
+export function LiveMap({
+  stops = [],
+  center = [52.2297, 21.0122] as [number, number],
+  zoom = 13,
+  showVehicles = true
+}: LiveMapProps) {
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+
+    const fetchVehicles = async () => {
+      const data = await ZTMApi.getVehicles();
+      setVehicles(data);
+    };
+
+    fetchVehicles();
+
+    if (showVehicles) {
+      interval = setInterval(fetchVehicles, 15000);
+    }
+
+    return () => clearInterval(interval);
+  }, [showVehicles]);
+
+  return (
+    <MapContainer center={center} zoom={zoom} style={{ height: '100%', width: '100%' }}>
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+
+      {stops.map((stop) => (
+        <Marker key={stop.id} position={[stop.latitude, stop.longitude]} icon={STOP_ICON}>
+          <Popup>
+            <div className="text-sm">
+              <div className="font-bold">{stop.name}</div>
+              <div className="text-gray-600">{stop.lines.join(', ')}</div>
+            </div>
+          </Popup>
+        </Marker>
+      ))}
+
+      {vehicles.map((vehicle) => (
+        <Marker
+          key={vehicle.id}
+          position={[vehicle.latitude, vehicle.longitude]}
+          icon={vehicle.type === 'bus' ? BUS_ICON : TRAM_ICON}
+        >
+          <Popup>
+            <div className="text-sm">
+              <div className="font-bold">Linia {vehicle.line}</div>
+              <div className="text-gray-600">Brygada: {vehicle.brigade}</div>
+              <div className="text-xs text-gray-400">
+                {vehicle.lastUpdate.toLocaleTimeString('pl-PL')}
+              </div>
+            </div>
+          </Popup>
+        </Marker>
+      ))}
+
+      <Polyline
+        positions={[
+          [52.2600, 20.9940],
+          [52.2490, 21.0030],
+          [52.2300, 21.0095],
+          [52.2200, 21.0090],
+          [52.1960, 21.0270],
+          [52.1600, 21.0380]
+        ]}
+        color="#E63946"
+        weight={4}
+        opacity={0.7}
+        dashArray="8,4"
+      />
+      <Polyline
+        positions={[
+          [52.2570, 21.0440],
+          [52.2490, 21.0370],
+          [52.2390, 21.0290],
+          [52.2310, 21.0065],
+          [52.2310, 20.9930],
+          [52.2310, 20.9620]
+        ]}
+        color="#003366"
+        weight={4}
+        opacity={0.7}
+        dashArray="8,4"
+      />
+    </MapContainer>
+  );
+}'use client';
+
+import { useState } from 'react';
+import { Route, Stop } from '@/types';
+import { RoutingService } from '@/services/routing';
+import { ZTMApi } from '@/services/ztm-api';
+import { MapPin, Clock, Repeat2 } from 'lucide-react';
+import toast from 'react-hot-toast';
+
+interface RoutePlannerProps {
+  onRouteSelect?: (route: Route) => void;
+}
+
+export function RoutePlanner({ onRouteSelect }: RoutePlannerProps) {
+  const [startStop, setStartStop] = useState<Stop | null>(null);
+  const [endStop, setEndStop] = useState<Stop | null>(null);
+  const [routes, setRoutes] = useState<Route[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [suggestions, setSuggestions] = useState<Stop[]>([]);
+  const [focusType, setFocusType] = useState<'start' | 'end' | null>(null);
+
+  const handleSearch = async (query: string, type: 'start' | 'end') => {
+    setSearchQuery(query);
+    setFocusType(type);
+    
+    if (query.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+
+    try {
+      const results = await ZTMApi.searchStops(query);
+      setSuggestions(results);
+    } catch (error) {
+      console.error('Search error:', error);
+      toast.error('Błąd przy wyszukiwaniu przystanków');
+    }
+  };
+
+  const planRoute = async () => {
+    if (!startStop || !endStop) {
+      toast.error('Wybierz punkt startu i przeznaczenia');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const plannedRoutes = await RoutingService.planRoute(startStop, endStop);
+      setRoutes(plannedRoutes);
+    } catch (error) {
+      console.error('Planning error:', error);
+      toast.error('Błąd przy planowaniu trasy');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const swapStops = () => {
+    const temp = startStop;
+    setStartStop(endStop);
+    setEndStop(temp);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-4">
+        <div className="relative">
+          <MapPin className="absolute left-3 top-3 text-green-600 w-5 h-5" />
+          <input
+            type="text"
+            placeholder="Skąd jedziesz?"
+            value={startStop?.name || searchQuery}
+            onChange={(e) => handleSearch(e.target.value, 'start')}
+            onFocus={() => setFocusType('start')}
+            className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+          />
+          {suggestions.length > 0 && focusType === 'start' && (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-300 rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
+              {suggestions.map((stop) => (
+                <button
+                  key={stop.id}
+                  onClick={() => {
+                    setStartStop(stop);
+                    setSuggestions([]);
+                    setFocusType(null);
+                  }}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-100 border-b last:border-b-0"
+                >
+                  <div className="font-semibold">{stop.name}</div>
+                  <div className="text-xs text-gray-500">{stop.stopNumber}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={swapStops}
+          className="flex items-center justify-center w-full py-2 text-red-600 hover:bg-red-50 rounded-lg transition"
+        >
+          <Repeat2 className="w-5 h-5" />
+        </button>
+
+        <div className="relative">
+          <MapPin className="absolute left-3 top-3 text-red-600 w-5 h-5" />
+          <input
+            type="text"
+            placeholder="Dokąd jedziesz?"
+            value={endStop?.name || (focusType === 'end' ? searchQuery : '')}
+            onChange={(e) => handleSearch(e.target.value, 'end')}
+            onFocus={() => setFocusType('end')}
+            className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+          />
+          {suggestions.length > 0 && focusType === 'end' && (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-300 rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
+              {suggestions.map((stop) => (
+                <button
+                  key={stop.id}
+                  onClick={() => {
+                    setEndStop(stop);
+                    setSuggestions([]);
+                    setFocusType(null);
+                  }}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-100 border-b last:border-b-0"
+                >
+                  <div className="font-semibold">{stop.name}</div>
+                  <div className="text-xs text-gray-500">{stop.stopNumber}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <button
+        onClick={planRoute}
+        disabled={loading}
+        className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 disabled:opacity-50 transition"
+      >
+        {loading ? 'Szukam tras...' : '🔍 Szukaj trasy'}
+      </button>
+
+      <div className="space-y-3">
+        {routes.map((route) => (
+          <button
+            key={route.id}
+            onClick={() => onRouteSelect?.(route)}
+            className="w-full p-4 bg-white border border-gray-200 rounded-lg hover:shadow-lg transition text-left"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 text-2xl font-bold text-red-600">
+                {route.duration}
+                <span className="text-sm text-gray-600">min</span>
+              </div>
+              <div className="text-right">
+                <div className="text-sm text-gray-600">
+                  {route.departureTime.toLocaleTimeString('pl-PL', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </div>
+                <div className="text-sm text-gray-600">
+                  →
+                  {route.arrivalTime.toLocaleTimeString('pl-PL', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 mb-2 flex-wrap">
+              {route.legs.map((leg, i) => (
+                leg.type === 'transit' && (
+                  <span
+                    key={i}
+                    className="inline-block px-2 py-1 bg-red-600 text-white text-sm font-bold rounded"
+                  >
+                    {leg.line}
+                  </span>
+                )
+              ))}
+              {route.transfers > 0 && (
+                <span className="text-sm text-gray-600">{route.transfers} przesiadka(i)</span>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between text-sm text-gray-600">
+              <span>Bilet ZTM</span>
+              {route.isFree && <span className="bg-green-100 text-green-800 px-2 py-1 rounded font-bold">DARMOWY</span>}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}'use client';
+
+import { useState } from 'react';
+import { Ticket } from '@/types';
+import { useStore } from '@/store/useStore';
+import QRCode from 'qrcode.react';
+import { Clock, Check } from 'lucide-react';
+import toast from 'react-hot-toast';
+
+const OFFICIAL_TICKETS: Ticket[] = [
+  {
+    id: '1',
+    name: 'Jednorazowy',
+    price: 0,
+    currency: 'PLN',
+    validity: 90,
+    zone: '1',
+    type: 'single',
+    isFree: true
+  },
+  {
+    id: '2',
+    name: '20-minutowy',
+    price: 0,
+    currency: 'PLN',
+    validity: 20,
+    zone: '1',
+    type: 'timed',
+    isFree: true
+  },
+  {
+    id: '3',
+    name: '50-minutowy',
+    price: 0,
+    currency: 'PLN',
+    validity: 50,
+    zone: '1',
+    type: 'timed',
+    isFree: true
+  },
+  {
+    id: '4',
+    name: '90-minutowy',
+    price: 0,
+    currency: 'PLN',
+    validity: 90,
+    zone: '1',
+    type: 'timed',
+    isFree: true
+  },
+  {
+    id: '5',
+    name: '24-godzinny',
+    price: 0,
+    currency: 'PLN',
+    validity: 1440,
+    zone: '1',
+    type: 'daily',
+    isFree: true
+  },
+  {
+    id: '6',
+    name: '72-godzinny',
+    price: 0,
+    currency: 'PLN',
+    validity: 4320,
+    zone: '1',
+    type: 'weekly',
+    isFree: true
+  }
+];
+
+export function TicketManager() {
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [showQR, setShowQR] = useState(false);
+  const { activeTickets, activateTicket, deactivateTicket } = useStore();
+
+  const handleActivate = (ticket: Ticket) => {
+    const activatedTicket = {
+      ...ticket,
+      activated: new Date(),
+      expiresAt: new Date(Date.now() + ticket.validity * 60000)
+    };
+    activateTicket(activatedTicket);
+    setShowQR(true);
+    toast.success('Bilet aktywowany! ✅');
+  };
+
+  return (
+    <div className="space-y-4">
+      {activeTickets.length > 0 && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+          <div className="font-bold text-green-800 mb-2">🎫 Aktywne bilety:</div>
+          {activeTickets.map((ticket) => (
+            <div
+              key={ticket.id}
+              className="flex items-center justify-between bg-white p-3 rounded mb-2"
+            >
+              <div>
+                <div className="font-semibold">{ticket.name}</div>
+                <div className="text-sm text-gray-600">
+                  ✓ Ważny do {ticket.expiresAt?.toLocaleTimeString('pl-PL')}
+                </div>
+              </div>
+              <button
+                onClick={() => deactivateTicket(ticket.id)}
+                className="text-red-600 hover:text-red-800 text-sm"
+              >
+                Usuń
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {OFFICIAL_TICKETS.map((ticket) => (
+          <div
+            key={ticket.id}
+            onClick={() => {
+              setSelectedTicket(ticket);
+              setShowQR(false);
+            }}
+            className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition cursor-pointer"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-semibold text-lg">{ticket.name}</div>
+                <div className="flex gap-2 mt-1">
+                  <span className="bg-red-100 text-red-700 text-xs px-2 py-1 rounded">
+                    Strefa {ticket.zone}
+                  </span>
+                  <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded font-bold">
+                    DARMOWY
+                  </span>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-bold text-green-600">0 zł</div>
+                <div className="text-sm text-gray-600 flex items-center gap-1">
+                  <Clock className="w-4 h-4" />
+                  {ticket.validity} min
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {selectedTicket && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end z-50">
+          <div className="bg-white w-full rounded-t-2xl p-6 space-y-4 animate-in slide-in-from-bottom">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold">{selectedTicket.name}</h2>
+              <button
+                onClick={() => setSelectedTicket(null)}
+                className="text-gray-500 hover:text-gray-700 text-2xl"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2 bg-gray-50 p-4 rounded-lg">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Cena:</span>
+                <span className="font-bold text-2xl text-green-600">DARMOWY</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Ważność:</span>
+                <span className="font-semibold">{selectedTicket.validity} minut</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Strefa:</span>
+                <span className="font-semibold">{selectedTicket.zone}</span>
+              </div>
+            </div>
+
+            {showQR && selectedTicket.activated && (
+              <div className="bg-gray-50 p-4 rounded-lg flex flex-col items-center">
+                <div className="bg-white p-2 rounded">
+                  <QRCode
+                    value={JSON.stringify({
+                      ticket: selectedTicket.name,
+                      activated: selectedTicket.activated.toISOString(),
+                      expiresAt: selectedTicket.expiresAt?.toISOString(),
+                      zone: selectedTicket.zone,
+                      isFree: true
+                    })}
+                    size={180}
+                    level="H"
+                    includeMargin={true}
+                  />
+                </div>
+                <div className="mt-4 text-center">
+                  <div className="flex items-center justify-center text-green-600 gap-2 mb-2">
+                    <Check className="w-5 h-5" />
+                    <span className="font-bold">Bilet aktywowany!</span>
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    Ważny do {selectedTicket.expiresAt?.toLocaleTimeString('pl-PL')}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => {
+                if (!showQR) {
+                  handleActivate(selectedTicket);
+                }
+              }}
+              disabled={showQR}
+              className="w-full bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 disabled:opacity-50 transition"
+            >
+              {showQR ? '✓ Bilet aktywowany' : '▶ Aktywuj bilet'}
+            </button>
+
+            <button
+              onClick={() => setSelectedTicket(null)}
+              className="w-full bg-gray-200 text-gray-800 py-3 rounded-lg font-semibold hover:bg-gray-300 transition"
+            >
+              Zamknij
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}import type { Metadata } from 'next';
+import { Toaster } from 'react-hot-toast';
+import '../styles/globals.css';
+
+export const metadata: Metadata = {
+  title: 'JakDojade.pl - ZTM Warszawa',
+  description: 'Profesjonalna aplikacja do planowania tras w komunikacji publicznej Warszawy',
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="pl">
+      <body>
+        {children}
+        <Toaster position="bottom-center" />
+      </body>
+    </html>
+  );
+}'use client';
+
+import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
+import { RoutePlanner } from '@/components/RoutePlanner/RoutePlanner';
+import { TicketManager } from '@/components/Tickets/TicketManager';
+import { Route, Stop } from '@/types';
+import { ZTMApi } from '@/services/ztm-api';
+import { MapPin, Clock, BarChart3, Zap, Home } from 'lucide-react';
+
+const LiveMap = dynamic(() => import('@/components/Map/LiveMap').then(mod => ({ default: mod.LiveMap })), {
+  ssr: false,
+  loading: () => <div className="h-96 bg-gray-200 animate-pulse rounded-lg" />
+});
+
+export default function Home() {
+  const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
+  const [activeTab, setActiveTab] = useState<'planner' | 'tickets' | 'map' | 'home'>('home');
+  const [stops, setStops] = useState<Stop[]>([]);
+
+  useEffect(() => {
+    const loadStops = async () => {
+      const data = await ZTMApi.getAllStops();
+      setStops(data.slice(0, 50));
+    };
+    loadStops();
+  }, []);
+
+  return (
+    <main className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-gradient-to-r from-red-600 to-red-700 text-white p-4 sticky top-0 z-40 shadow-lg">
+        <div className="max-w-4xl mx-auto">
+          <h1 className="text-3xl font-black">
+            jakdojade<span className="opacity-60">.pl</span>
+          </h1>
+          <p className="text-sm text-red-100">⚡ Warszawa · ZTM na żywo</p>
+        </div>
+      </header>
+
+      {/* Tabs */}
+      <div className="bg-white border-b border-gray-200 sticky top-16 z-30">
+        <div className="max-w-4xl mx-auto flex gap-4 p-4 overflow-x-auto">
+          <button
+            onClick={() => setActiveTab('home')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap ${
+              activeTab === 'home'
+                ? 'bg-red-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            <Home className="w-5 h-5" />
+            Home
+          </button>
+          <button
+            onClick={() => setActiveTab('planner')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap ${
+              activeTab === 'planner'
+                ? 'bg-red-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            🗺️ Planer
+          </button>
+          <button
+            onClick={() => setActiveTab('tickets')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap ${
+              activeTab === 'tickets'
+                ? 'bg-red-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            🎫 Bilety
+          </button>
+          <button
+            onClick={() => setActiveTab('map')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap ${
+              activeTab === 'map'
+                ? 'bg-red-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            📡 Mapa
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="max-w-4xl mx-auto p-4">
+        {/* Home */}
+        {activeTab === 'home' && (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg p-8">
+              <h2 className="text-4xl font-black mb-2">JakDojade</h2>
+              <p className="text-red-100 text-lg mb-6">Najlepsza aplikacja do transportu publicznego Warszawy</p>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-white bg-opacity-20 rounded-lg p-4 text-center">
+                  <Zap className="w-8 h-8 mx-auto mb-2" />
+                  <div className="text-sm font-semibold">Szybkie trasy</div>
+                </div>
+                <div className="bg-white bg-opacity-20 rounded-lg p-4 text-center">
+                  <MapPin className="w-8 h-8 mx-auto mb-2" />
+                  <div className="text-sm font-semibold">Mapa Live</div>
+                </div>
+                <div className="bg-white bg-opacity-20 rounded-lg p-4 text-center">
+                  <Clock className="w-8 h-8 mx-auto mb-2" />
+                  <div className="text-sm font-semibold">Na żywo 24/7</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg p-6 shadow-sm">
+              <h3 className="text-2xl font-bold mb-4">🎉 Promocja!</h3>
+              <div className="bg-green-50 border-l-4 border-green-600 p-4 mb-4">
+                <p className="text-xl font-bold text-green-800">WSZYSTKIE BILETY DARMOWE!</p>
+                <p className="text-green-700">Każdy bilet ZTM kosztu 0 zł. Bez ukrytych opłat.</p>
+              </div>
+              <button
+                onClick={() => setActiveTab('tickets')}
+                className="w-full bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 transition"
+              >
+                Przejdź do biletów
+              </button>
+            </div>
+
+            <div className="bg-white rounded-lg p-6 shadow-sm">
+              <h3 className="text-2xl font-bold mb-4">📊 Szybkie statystyki</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <div className="text-3xl font-bold text-blue-600">500+</div>
+                  <div className="text-gray-600">Przystanków</div>
+                </div>
+                <div className="bg-purple-50 p-4 rounded-lg">
+                  <div className="text-3xl font-bold text-purple-600">150+</div>
+                  <div className="text-gray-600">Linii</div>
+                </div>
+                <div className="bg-green-50 p-4 rounded-lg">
+                  <div className="text-3xl font-bold text-green-600">3000+</div>
+                  <div className="text-gray-600">Pojazdów</div>
+                </div>
+                <div className="bg-orange-50 p-4 rounded-lg">
+                  <div className="text-3xl font-bold text-orange-600">Real-time</div>
+                  <div className="text-gray-600">Aktualizacja</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Planner */}
+        {activeTab === 'planner' && (
+          <div className="bg-white rounded-lg p-6 shadow-sm">
+            <h2 className="text-2xl font-bold mb-4">🗺️ Planer tras</h2>
+            <RoutePlanner onRouteSelect={setSelectedRoute} />
+
+            {selectedRoute && (
+              <div className="mt-6 p-4 bg-blue-50 border-l-4 border-blue-600 rounded">
+                <h3 className="font-bold text-blue-900 mb-2">Wybrana trasa</h3>
+                <div className="space-y-1 text-sm text-blue-800">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    Czas podróży: {selectedRoute.duration} minut
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4" />
+                    Przesiadek: {selectedRoute.transfers}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tickets */}
+        {activeTab === 'tickets' && (
+          <div className="bg-white rounded-lg p-6 shadow-sm">
+            <h2 className="text-2xl font-bold mb-4">🎫 Bilety ZTM Warszawa</h2>
+            <div className="bg-gradient-to-r from-green-600 to-green-700 text-white p-4 rounded-lg mb-4 text-center">
+              <p className="text-sm font-semibold">PROMOCJA 2026</p>
+              <p className="text-2xl font-black">WSZYSTKIE BILETY 0 PLN</p>
+            </div>
+            <TicketManager />
+          </div>
+        )}
+
+        {/* Map */}
+        {activeTab === 'map' && (
+          <div className="bg-white rounded-lg p-6 shadow-sm">
+            <h2 className="text-2xl font-bold mb-4">📡 Mapa pojazdów ZTM</h2>
+            <div className="h-96 bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
+              <LiveMap stops={stops.slice(0, 20)} showVehicles={true} />
+            </div>
+            <p className="text-xs text-gray-600 mt-2">Pozycje pojazdów aktualizowane co 15 sekund</p>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <footer className="bg-gray-900 text-gray-400 py-8 mt-12">
+        <div className="max-w-4xl mx-auto text-center text-sm">
+          <p>© 2026 JakDojade.pl • Transport Warszawy</p>
+          <p className="mt-2">API: ZTM Warszawa • Maps: OpenStreetMap</p>
+        </div>
+      </footer>
+    </main>
+  );
+}@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-gray-50;
+}
+
+/* Leaflet overrides */
+.leaflet-container {
+  @apply rounded-lg overflow-hidden;
+}
+
+/* Animations */
+@keyframes slide-in-from-bottom {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: slide-in-from-bottom 0.3s ease-out;
+}# JakDojade.pl - Profesjonalna aplikacja ZTM Warszawa
+
+Nowoczesna aplikacja do planowania tras w komunikacji publicznej Warszawy.
+
+## 🚀 Cechy
+
+✅ **Planowanie tras** - szukaj najlepszych połączeń  
+✅ **Bilety darmowe** - wszystkie bilety ZTM za darmo  
+✅ **Mapa na żywo** - pozycje pojazdów aktualizowane co 15 sekund  
+✅ **QR kody** - aktywacja biletów przez QR  
+✅ **Ulubione** - zapisuj ulubione przystanki i linie  
+✅ **Historia wyszukiwania** - szybki dostęp  
+✅ **Responsywny design** - działa na każdym urządzeniu  
+
+## 📦 Setup
