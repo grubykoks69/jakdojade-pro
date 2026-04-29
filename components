@@ -1,0 +1,24 @@
+'use client';
+
+import { MapContainer, TileLayer, Marker } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import { useEffect, useState } from 'react';
+
+export default function Map() {
+  const [vehicles, setVehicles] = useState([]);
+
+  useEffect(() => {
+    fetch(`https://api.um.warszawa.pl/api/action/busestrams_get?resource_id=f2e5503e-927d-4ad3-9500-4ab9e55deb59&apikey=73496a74-8e87-40df-9399-1d8e495cbc9a&type=1`)
+      .then(res => res.json())
+      .then(data => setVehicles(data.result || []));
+  }, []);
+
+  return (
+    <MapContainer center={[52.2297, 21.0122]} zoom={13} style={{ height: '80vh' }}>
+      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      {vehicles.map((v, i) => (
+        <Marker key={i} position={[parseFloat(v.Lat), parseFloat(v.Lon)]} />
+      ))}
+    </MapContainer>
+  );
+}
